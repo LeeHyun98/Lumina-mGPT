@@ -165,6 +165,7 @@ xllmx/output/
 xllmx/output_dir/
 tokenizer.model
 *.swp
+lumina_mgpt/ckpts/chameleon/tokenizer/*.ckpt
 
 .asset/
 
