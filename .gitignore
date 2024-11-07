@@ -167,3 +167,7 @@ tokenizer.model
 *.swp
 
 .asset/
+
+# NVIDIA APEX
+apex
+apex/*
