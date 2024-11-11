@@ -3,17 +3,23 @@ import copy
 import math
 from typing import List, Optional, Union
 
-from PIL import Image
 import torch
 import transformers
+from PIL import Image
 from transformers import GenerationConfig, TextStreamer
-from transformers.generation.logits_process import LogitsProcessor, LogitsProcessorList, LogitsWarper
+from transformers.generation.logits_process import (
+    LogitsProcessor,
+    LogitsProcessorList,
+    LogitsWarper,
+)
 
-from data.item_processor import FlexARItemProcessor
-from model.chameleon import ChameleonForConditionalGeneration
+from .data.item_processor import FlexARItemProcessor
+from .model.chameleon import ChameleonForConditionalGeneration
 
 
-class LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(LogitsProcessor):
+class LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(
+    LogitsProcessor
+):
     r"""
     Logits processor for Classifier-Free Guidance (CFG). The processors computes a weighted average across scores
     from prompt conditional and prompt unconditional (or negative) logits, parameterized by the `guidance_scale`.
@@ -56,10 +62,11 @@ class LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(Logit
         self.w_latent_dim = None
 
     def get_unconditional_logits(self, input_ids, image_start_token_id_index):
-
         if self.unconditional_context["first_pass"]:
             if self.unconditional_context["input_ids"] is None:
-                self.unconditional_context["input_ids"] = input_ids[:, image_start_token_id_index:]
+                self.unconditional_context["input_ids"] = input_ids[
+                    :, image_start_token_id_index:
+                ]
             if self.unconditional_context["attention_mask"] is None:
                 self.unconditional_context["attention_mask"] = torch.ones_like(
                     self.unconditional_context["input_ids"], dtype=torch.long
@@ -76,7 +83,9 @@ class LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(Logit
                 dim=1,
             )
             if not self.unconditional_context["use_cache"]:
-                input_ids = torch.cat([self.unconditional_context["input_ids"], input_ids[:, -1:]], dim=1)
+                input_ids = torch.cat(
+                    [self.unconditional_context["input_ids"], input_ids[:, -1:]], dim=1
+                )
             else:
                 input_ids = input_ids[:, -1:]
             self.unconditional_context["input_ids"] = input_ids
@@ -104,7 +113,9 @@ class LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(Logit
 
         elif num_image_start_tokens == num_image_end_tokens + 1:
             if self.image_start_token_id_index is None:
-                self.image_start_token_id_index = torch.where(input_ids[0] == self.image_start_token_id)[0][-1].item()
+                self.image_start_token_id_index = torch.where(
+                    input_ids[0] == self.image_start_token_id
+                )[0][-1].item()
             new_token_num = len(input_ids[0][self.image_start_token_id_index + 1 :])
             if new_token_num >= 2:
                 if self.h_latent_dim is None or self.w_latent_dim is None:
@@ -115,14 +126,21 @@ class LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(Logit
                     self.h_latent_dim, self.w_latent_dim = h_grids * 2, w_grids * 2
 
                 if self.unconditional_context is None:
-                    self.unconditional_context = copy.deepcopy(self.unconditional_context_backup)
+                    self.unconditional_context = copy.deepcopy(
+                        self.unconditional_context_backup
+                    )
 
                 if self.guidance_scale == 1.0:
                     return scores
 
-                unconditional_logits = self.get_unconditional_logits(input_ids, self.image_start_token_id_index)[:, -1]
+                unconditional_logits = self.get_unconditional_logits(
+                    input_ids, self.image_start_token_id_index
+                )[:, -1]
 
-                scores_processed = self.guidance_scale * (scores - unconditional_logits) + unconditional_logits
+                scores_processed = (
+                    self.guidance_scale * (scores - unconditional_logits)
+                    + unconditional_logits
+                )
                 return scores_processed
 
         else:
@@ -132,7 +150,6 @@ class LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(Logit
 
 
 class MultiModalLogitsProcessor(LogitsProcessor):
-
     def __init__(
         self,
         image_start_token_id=None,
@@ -152,13 +169,15 @@ class MultiModalLogitsProcessor(LogitsProcessor):
         self.vocab_list = [i for i in range(voc_size)]
         self.image_token_list = [i for i in range(4, 8195 + 1)]
         self.suppress_tokens = torch.tensor(
-            [x for x in self.vocab_list if x not in self.image_token_list], device="cuda"
+            [x for x in self.vocab_list if x not in self.image_token_list],
+            device="cuda",
         )
 
         self.vocab_tensor = torch.arange(voc_size, device="cuda")
         self.suppress_token_mask = torch.isin(self.vocab_tensor, self.suppress_tokens)
         self.new_line_force_token_mask = torch.isin(
-            self.vocab_tensor, torch.tensor([self.image_next_line_token_id], device="cuda")
+            self.vocab_tensor,
+            torch.tensor([self.image_next_line_token_id], device="cuda"),
         )
         self.eos_image_force_token_mask = torch.isin(
             self.vocab_tensor, torch.tensor([self.image_end_token_id], device="cuda")
@@ -169,8 +188,9 @@ class MultiModalLogitsProcessor(LogitsProcessor):
         self.num_image_end_tokens = None
 
     # @add_start_docstrings(LOGITS_PROCESSOR_INPUTS_DOCSTRING)
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-
+    def __call__(
+        self, input_ids: torch.LongTensor, scores: torch.FloatTensor
+    ) -> torch.FloatTensor:
         self.num_image_start_tokens = (input_ids[0] == self.image_start_token_id).sum()
         self.num_image_end_tokens = (input_ids[0] == self.image_end_token_id).sum()
 
@@ -183,9 +203,13 @@ class MultiModalLogitsProcessor(LogitsProcessor):
 
         elif self.num_image_start_tokens == self.num_image_end_tokens + 1:
             if self.image_start_token_id_index is None:
-                self.image_start_token_id_index = torch.where(input_ids[0] == self.image_start_token_id)[0]
+                self.image_start_token_id_index = torch.where(
+                    input_ids[0] == self.image_start_token_id
+                )[0]
                 print(self.image_start_token_id_index)
-                self.image_start_token_id_index = torch.where(input_ids[0] == self.image_start_token_id)[0][-1].item()
+                self.image_start_token_id_index = torch.where(
+                    input_ids[0] == self.image_start_token_id
+                )[0][-1].item()
 
             new_token_num = len(input_ids[0][self.image_start_token_id_index + 1 :])
             # print(f"num new tokens: {new_token_num}")
@@ -197,21 +221,29 @@ class MultiModalLogitsProcessor(LogitsProcessor):
                     )
                     # print(f"h_grids: {h_grids}, w_grids: {w_grids}")
                     self.h_latent_dim, self.w_latent_dim = h_grids * 2, w_grids * 2
-                    print(f"h_latent_dim: {self.h_latent_dim}, w_latent_dim: {self.w_latent_dim}")
+                    print(
+                        f"h_latent_dim: {self.h_latent_dim}, w_latent_dim: {self.w_latent_dim}"
+                    )
 
                 tokens = input_ids[0][self.image_start_token_id_index + 3 :]
                 if (len(tokens) + 1) % (self.w_latent_dim + 1) == 0:
                     new_line_constrained_scores = torch.full_like(scores, -math.inf)
                     new_line_constrained_scores[:, self.image_next_line_token_id] = 0
                     print(f"new line: {len(tokens)+1}")
+                    # I want to measure the GPU memory usage
+                    print(torch.cuda.memory_summary())
                     return new_line_constrained_scores
-                elif (len(tokens) + 1) == (self.w_latent_dim + 1) * self.h_latent_dim + 1:
+                elif (len(tokens) + 1) == (
+                    self.w_latent_dim + 1
+                ) * self.h_latent_dim + 1:
                     eos_image_constrained_scores = torch.full_like(scores, -math.inf)
                     eos_image_constrained_scores[:, self.image_end_token_id] = 0
                     print(f"eos image: {len(tokens)+1}")
                     return eos_image_constrained_scores
                 elif (len(tokens) + 1) % (self.w_latent_dim + 1) != 0:
-                    image_constrained_scores = torch.where(self.suppress_token_mask, -float("inf"), scores)
+                    image_constrained_scores = torch.where(
+                        self.suppress_token_mask, -float("inf"), scores
+                    )
                     return image_constrained_scores
         else:
             print("Something wrong in the decoding process.")
@@ -235,9 +267,13 @@ class InterleavedTopKLogitsWarper(LogitsWarper):
         min_tokens_to_keep: int = 1,
     ):
         if not isinstance(text_top_k, int) or text_top_k <= 0:
-            raise ValueError(f"`text_top_k` has to be a strictly positive integer, but is {text_top_k}")
+            raise ValueError(
+                f"`text_top_k` has to be a strictly positive integer, but is {text_top_k}"
+            )
         if not isinstance(image_top_k, int) or text_top_k <= 0:
-            raise ValueError(f"`image_top_k` has to be a strictly positive integer, but is {image_top_k}")
+            raise ValueError(
+                f"`image_top_k` has to be a strictly positive integer, but is {image_top_k}"
+            )
 
         self.image_top_k = max(image_top_k, min_tokens_to_keep)
         self.text_top_k = max(text_top_k, min_tokens_to_keep)
@@ -251,8 +287,9 @@ class InterleavedTopKLogitsWarper(LogitsWarper):
         self.num_image_end_tokens = None
 
     # @add_start_docstrings(LOGITS_PROCESSOR_INPUTS_DOCSTRING)
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-
+    def __call__(
+        self, input_ids: torch.LongTensor, scores: torch.FloatTensor
+    ) -> torch.FloatTensor:
         self.num_image_start_tokens = (input_ids[0] == self.image_start_token_id).sum()
         self.num_image_end_tokens = (input_ids[0] == self.image_end_token_id).sum()
 
@@ -271,12 +308,18 @@ class FlexARInferenceSolver:
     def get_args_parser(cls):
         parser = argparse.ArgumentParser("xllmx Inference", add_help=False)
         parser.add_argument("--model_path", type=str)
-        parser.add_argument("--precision", type=str, choices=["fp16", "bf16", "tf32"], default="bf16")
+        parser.add_argument(
+            "--precision", type=str, choices=["fp16", "bf16", "tf32"], default="bf16"
+        )
 
         return parser
 
     def __init__(self, model_path, precision, target_size=512):
-        self.dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
+        self.dtype = {
+            "bf16": torch.bfloat16,
+            "fp16": torch.float16,
+            "fp32": torch.float32,
+        }[precision]
 
         self.model = ChameleonForConditionalGeneration.from_pretrained(
             model_path,
@@ -298,7 +341,6 @@ class FlexARInferenceSolver:
         logits_processor=None,
         streamer=None,
     ):
-
         conversations = []
         for q, a in qas:
             conversations.append(
@@ -323,7 +365,9 @@ class FlexARInferenceSolver:
             else:
                 prompt += value["input_ids"]
         prompt_len = len(prompt)
-        prompt = torch.tensor(prompt, dtype=torch.int64, device=self.model.device).unsqueeze(0)
+        prompt = torch.tensor(
+            prompt, dtype=torch.int64, device=self.model.device
+        ).unsqueeze(0)
 
         generation_config = GenerationConfig(
             max_new_tokens=max_gen_len,
@@ -339,7 +383,10 @@ class FlexARInferenceSolver:
 
         with torch.cuda.amp.autocast(dtype=self.dtype):
             generation_result = self.model.generate(
-                prompt, generation_config, logits_processor=logits_processor, streamer=streamer
+                prompt,
+                generation_config,
+                logits_processor=logits_processor,
+                streamer=streamer,
             )[0][prompt_len:].tolist()
             if len(generation_result) > 0 and generation_result[-1] == 8710:
                 generation_result = generation_result[:-1]
@@ -352,16 +399,22 @@ class FlexARInferenceSolver:
         i = 0
         while i < len(tokens):
             token_id = tokens[i]
-            if token_id == self.item_processor.token2id(self.item_processor.image_start_token):
+            if token_id == self.item_processor.token2id(
+                self.item_processor.image_start_token
+            ):
                 cache = []
                 for j in range(i + 1, len(tokens)):
-                    if tokens[j] != self.item_processor.token2id(self.item_processor.image_end_token):
+                    if tokens[j] != self.item_processor.token2id(
+                        self.item_processor.image_end_token
+                    ):
                         cache.append(tokens[j])
                         i = j + 1
                     else:
                         image = self.decode_image(cache)
                         generated_images.append(image)
-                        generation_result_processed.append(self.item_processor.token2id("<|image|>"))
+                        generation_result_processed.append(
+                            self.item_processor.token2id("<|image|>")
+                        )
                         i = j + 1
                         break
             else:
@@ -391,19 +444,33 @@ class FlexARInferenceSolver:
     def create_logits_processor(self, cfg=3.0, image_top_k=2000, text_top_k=10):
         logits_processor = LogitsProcessorList()
 
-        cfg_processor = LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(
-            guidance_scale=cfg,
-            model=self.model,
-            image_start_token_id=self.item_processor.token2id(self.item_processor.image_start_token),
-            image_end_token_id=self.item_processor.token2id(self.item_processor.image_end_token),
-            image_next_line_token_id=self.item_processor.token2id(self.item_processor.new_line_token),
-            patch_size=32,
+        cfg_processor = (
+            LLMImageStartTriggeredUnbatchedClassifierFreeGuidanceLogitsProcessor(
+                guidance_scale=cfg,
+                model=self.model,
+                image_start_token_id=self.item_processor.token2id(
+                    self.item_processor.image_start_token
+                ),
+                image_end_token_id=self.item_processor.token2id(
+                    self.item_processor.image_end_token
+                ),
+                image_next_line_token_id=self.item_processor.token2id(
+                    self.item_processor.new_line_token
+                ),
+                patch_size=32,
+            )
         )
 
         candidate_processor = MultiModalLogitsProcessor(
-            image_start_token_id=self.item_processor.token2id(self.item_processor.image_start_token),
-            image_end_token_id=self.item_processor.token2id(self.item_processor.image_end_token),
-            image_next_line_token_id=self.item_processor.token2id(self.item_processor.new_line_token),
+            image_start_token_id=self.item_processor.token2id(
+                self.item_processor.image_start_token
+            ),
+            image_end_token_id=self.item_processor.token2id(
+                self.item_processor.image_end_token
+            ),
+            image_next_line_token_id=self.item_processor.token2id(
+                self.item_processor.new_line_token
+            ),
             patch_size=32,
             voc_size=self.model.config.vocab_size,
         )
@@ -411,8 +478,12 @@ class FlexARInferenceSolver:
         topk_processor = InterleavedTopKLogitsWarper(
             image_top_k=image_top_k,
             text_top_k=text_top_k,
-            image_start_token_id=self.item_processor.token2id(self.item_processor.image_start_token),
-            image_end_token_id=self.item_processor.token2id(self.item_processor.image_end_token),
+            image_start_token_id=self.item_processor.token2id(
+                self.item_processor.image_start_token
+            ),
+            image_end_token_id=self.item_processor.token2id(
+                self.item_processor.image_end_token
+            ),
         )
 
         logits_processor.append(cfg_processor)

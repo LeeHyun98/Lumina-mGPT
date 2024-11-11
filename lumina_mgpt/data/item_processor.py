@@ -1,25 +1,34 @@
 import json
 import logging
+import os
 import random
 from typing import Dict, List
 
-from PIL import Image
 import torch
-
-from data.convertsation import Conversation
-import model.chameleon_vae_ori as chameleon_vae_ori
+from PIL import Image
 from xllmx.data.data_reader import read_general
 from xllmx.data.item_processor import MMConvItemProcessor
+
+from ..data.convertsation import Conversation
+
+# import model.chameleon_vae_ori as chameleon_vae_ori
+from ..model import chameleon_vae_ori
 
 logger = logging.getLogger(__name__)
 
 
 def center_crop(pil_image, crop_size):
-    while pil_image.size[0] >= 2 * crop_size[0] and pil_image.size[1] >= 2 * crop_size[1]:
-        pil_image = pil_image.resize(tuple(x // 2 for x in pil_image.size), resample=Image.BOX)
+    while (
+        pil_image.size[0] >= 2 * crop_size[0] and pil_image.size[1] >= 2 * crop_size[1]
+    ):
+        pil_image = pil_image.resize(
+            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
+        )
 
     scale = max(crop_size[0] / pil_image.size[0], crop_size[1] / pil_image.size[1])
-    pil_image = pil_image.resize(tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC)
+    pil_image = pil_image.resize(
+        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
+    )
 
     crop_left = random.randint(0, pil_image.size[0] - crop_size[0])
     crop_upper = random.randint(0, pil_image.size[1] - crop_size[1])
@@ -30,9 +39,13 @@ def center_crop(pil_image, crop_size):
 
 def var_center_crop(pil_image, crop_size_list, random_top_k=1):
     w, h = pil_image.size
-    rem_percent = [min(cw / w, ch / h) / max(cw / w, ch / h) for cw, ch in crop_size_list]
+    rem_percent = [
+        min(cw / w, ch / h) / max(cw / w, ch / h) for cw, ch in crop_size_list
+    ]
     crop_size = random.choice(
-        sorted(((x, y) for x, y in zip(rem_percent, crop_size_list)), reverse=True)[:random_top_k]
+        sorted(((x, y) for x, y in zip(rem_percent, crop_size_list)), reverse=True)[
+            :random_top_k
+        ]
     )[1]
     return center_crop(pil_image, crop_size)
 
@@ -52,7 +65,9 @@ def generate_crop_size_list(num_patches, patch_size, max_ratio=4.0):
 
 
 class FlexARItemProcessor(MMConvItemProcessor):
-    image_start_token = "<racm3:break>"  # fixed tokens for start and end, so can hardcode
+    image_start_token = (
+        "<racm3:break>"  # fixed tokens for start and end, so can hardcode
+    )
     image_end_token = "<eoss>"
     full_sub_sep_token = "<reserved08796>"
     sub_sub_sep_token = "<reserved08797>"
@@ -65,7 +80,6 @@ class FlexARItemProcessor(MMConvItemProcessor):
         conv_template=Conversation,
         target_size=512,
     ):
-
         super().__init__(
             {
                 "<|image|>": self.process_image,
@@ -76,21 +90,50 @@ class FlexARItemProcessor(MMConvItemProcessor):
         )
 
         self.patch_size = 32
-        self.crop_size_list = generate_crop_size_list((target_size // self.patch_size) ** 2, self.patch_size)
+        self.crop_size_list = generate_crop_size_list(
+            (target_size // self.patch_size) ** 2, self.patch_size
+        )
         logger.info("List of crop sizes:")
         for i in range(0, len(self.crop_size_list), 6):
-            logger.info(" " + "".join([f"{f'{w} x {h}':14s}" for w, h in self.crop_size_list[i : i + 6]]))
+            logger.info(
+                " "
+                + "".join(
+                    [f"{f'{w} x {h}':14s}" for w, h in self.crop_size_list[i : i + 6]]
+                )
+            )
 
         #  todo
         #  currently still use the original image tokenizer provided by Meta rather than transformers
         #  because the transformers implementation does not contain the vae decoder
-        self.chameleon_ori_vocab = chameleon_vae_ori.VocabInfo(
-            json.load(open("./ckpts/chameleon/tokenizer/text_tokenizer.json", encoding="utf8"))["model"]["vocab"]
+        print("Print PWD", os.getcwd())
+
+        # root path is parent of parent of parent of current file
+        project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
         )
-        self.chameleon_ori_translation = chameleon_vae_ori.VocabTranslation(self.chameleon_ori_vocab, device="cuda")
+        print("Project Root", project_root)
+
+        tokenizer_ckpt_path = os.path.join(
+            project_root, "lumina_mgpt", "ckpts/chameleon/tokenizer"
+        )
+
+        self.chameleon_ori_vocab = chameleon_vae_ori.VocabInfo(
+            json.load(
+                # open("./ckpts/chameleon/tokenizer/text_tokenizer.json", encoding="utf8")
+                open(
+                    os.path.join(tokenizer_ckpt_path, "text_tokenizer.json"),
+                    encoding="utf8",
+                )
+            )["model"]["vocab"]
+        )
+        self.chameleon_ori_translation = chameleon_vae_ori.VocabTranslation(
+            self.chameleon_ori_vocab, device="cuda"
+        )
         self.chameleon_ori_image_tokenizer = chameleon_vae_ori.ImageTokenizer(
-            cfg_path="./ckpts/chameleon/tokenizer/vqgan.yaml",
-            ckpt_path="./ckpts/chameleon/tokenizer/vqgan.ckpt",
+            # cfg_path="../ckpts/chameleon/tokenizer/vqgan.yaml",
+            # ckpt_path="../ckpts/chameleon/tokenizer/vqgan.ckpt",
+            cfg_path=os.path.join(tokenizer_ckpt_path, "vqgan.yaml"),
+            ckpt_path=os.path.join(tokenizer_ckpt_path, "vqgan.ckpt"),
             device="cuda",
         )
 
@@ -110,7 +153,10 @@ class FlexARItemProcessor(MMConvItemProcessor):
 
         image = var_center_crop(image, crop_size_list=self.crop_size_list)
 
-        w_grids, h_grids = image.size[0] // self.patch_size, image.size[1] // self.patch_size
+        w_grids, h_grids = (
+            image.size[0] // self.patch_size,
+            image.size[1] // self.patch_size,
+        )
 
         image_toks = self.chameleon_ori_translation.convert_img2bp2(
             self.chameleon_ori_image_tokenizer.img_tokens_from_pil(image)
@@ -122,7 +168,12 @@ class FlexARItemProcessor(MMConvItemProcessor):
         full_image_toks = torch.cat(
             (
                 full_image_toks,
-                torch.ones(image.size[1] // 16, 1, device=full_image_toks.device, dtype=full_image_toks.dtype)
+                torch.ones(
+                    image.size[1] // 16,
+                    1,
+                    device=full_image_toks.device,
+                    dtype=full_image_toks.dtype,
+                )
                 * new_line_id,
             ),
             dim=1,
@@ -154,7 +205,9 @@ class FlexARItemProcessor(MMConvItemProcessor):
                 else:
                     input_tokens_item += token_or_media["input_ids"]
                     if ori_label <= 0:  # in the prompt part
-                        modified_labels_item += [-100] * len(token_or_media["input_ids"])
+                        modified_labels_item += [-100] * len(
+                            token_or_media["input_ids"]
+                        )
                     else:
                         modified_labels_item += token_or_media["labels"]
 
@@ -190,4 +243,6 @@ class FlexARItemProcessor(MMConvItemProcessor):
 
         tokens = tokens.view(h_latent_dim, w_latent_dim + 1)[:, :-1].flatten()
 
-        return self.chameleon_ori_image_tokenizer.pil_from_img_toks(tokens, h_latent_dim, w_latent_dim)
+        return self.chameleon_ori_image_tokenizer.pil_from_img_toks(
+            tokens, h_latent_dim, w_latent_dim
+        )
