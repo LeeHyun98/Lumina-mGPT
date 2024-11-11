@@ -172,3 +172,14 @@ lumina_mgpt/ckpts/chameleon/tokenizer/*.ckpt
 # NVIDIA APEX
 apex
 apex/*
+
+# log files
+*.log
+*.out
+
+# output files  
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.txt
