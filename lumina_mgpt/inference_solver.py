@@ -231,7 +231,7 @@ class MultiModalLogitsProcessor(LogitsProcessor):
                     new_line_constrained_scores[:, self.image_next_line_token_id] = 0
                     print(f"new line: {len(tokens)+1}")
                     # I want to measure the GPU memory usage
-                    print(torch.cuda.memory_summary())
+                    #print(torch.cuda.memory_summary())
                     return new_line_constrained_scores
                 elif (len(tokens) + 1) == (
                     self.w_latent_dim + 1
@@ -325,6 +325,8 @@ class FlexARInferenceSolver:
             model_path,
             torch_dtype=self.dtype,
             device_map="cuda",
+            trust_remote_code=True,
+            ignore_mismatched_sizes=True,
         )
         self.item_processor = FlexARItemProcessor(target_size=target_size)
 

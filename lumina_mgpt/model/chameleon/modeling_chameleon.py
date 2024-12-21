@@ -28,7 +28,7 @@ from transformers.cache_utils import Cache, StaticCache
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 from transformers.modeling_flash_attention_utils import _flash_attention_forward
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
-from transformers.modeling_utils import PreTrainedModel
+from transformers.modeling_utils import PreTrainedModel, GenerationMixin
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.utils import (
     add_code_sample_docstrings,
@@ -1101,7 +1101,7 @@ CHAMELEON_START_DOCSTRING = r"""
     "The bare chameleon Model outputting raw hidden-states without any specific head on top.",
     CHAMELEON_START_DOCSTRING,
 )
-class ChameleonPreTrainedModel(PreTrainedModel):
+class ChameleonPreTrainedModel(PreTrainedModel, GenerationMixin):
     config_class = ChameleonConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
